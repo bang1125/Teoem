@@ -1,0 +1,241 @@
+-- =============================================================================
+-- DRAGON BLOX SIMULATOR - MOBILE HUB (OPTIMIZED FOR DELTA X VNG)
+-- FILE: obfuscated_script-4829105739162.lua.txt
+-- =============================================================================
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local TeleportService = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+
+-- 1. KHỞI TẠO TRẠNG THÁI TÍNH NĂNG CHẠY NGẦM
+local States = {
+	AutoFarm = false, AutoRaid = false, AutoDungeon = false, NoCooldown = false,
+	Lifesteal = false, AutoBeast = false, AutoTransform = false, AutoAFK = false,
+	AutoAtomMax = false, AutoDLS = false
+}
+
+-- ĐỒNG BỘ THÔNG SỐ CHUẨN GAME DRAGON BLOX
+local Configuration = {
+	AttackRange = 25,         -- Tầm đánh cận chiến/Ki Blast
+	DamageAmount = 50,        
+	AttackCooldown = 0.6,     -- Tốc độ an toàn chống quá tải packet trên Delta X
+	DungeonPlaceId = 3254817462, -- ID Map Raid của game Dragon Blox
+	LifestealPercent = 0.25,  
+	BeastRequiredKi = 500000, -- Chỉ số Ki yêu cầu hóa Beast Form
+	BossName = "Atom Max",    
+	NextComboIndex = 1,       
+	MenuVisible = true,       
+	CurrentFormIndex = 0,     
+	BaseDamage = 50           
+}
+
+-- DANH SÁCH CHIÊU THỨC COMBO DLS (Divine Light Severance 1-2-3)
+local DLS_COMBO = {
+	{Name = "DLS 1", Damage = 150, Cooldown = 0.5},
+	{Name = "DLS 2", Damage = 300, Cooldown = 0.5},
+	{Name = "DLS 3", Damage = 600, Cooldown = 0.8}
+}
+
+-- DANH SÁCH CÁC CẤP ĐỘ BIẾN HÌNH CHUẨN DRAGON BLOX
+local TRANSFORMS = {
+	{Name = "SSJ 1", RequiredKi = 1000,    DamageMultiplier = 1.5, AuraColor = Color3.fromRGB(255, 255, 0)},
+	{Name = "SSJ 2", RequiredKi = 5000,    DamageMultiplier = 2.5, AuraColor = Color3.fromRGB(255, 220, 0)},
+	{Name = "SSJ 3", RequiredKi = 25000,   DamageMultiplier = 4.0, AuraColor = Color3.fromRGB(255, 140, 0)},
+	{Name = "SSJ God", RequiredKi = 100000,  DamageMultiplier = 6.5, AuraColor = Color3.fromRGB(255, 0, 50)},
+	{Name = "SSJ Blue", RequiredKi = 500000, DamageMultiplier = 10.0, AuraColor = Color3.fromRGB(0, 180, 255)},
+}
+
+-- Tự động dọn dẹp Giao diện cũ để tránh lỗi trùng lặp UI khi chạy lại script trên Mobile
+if game:GetService("CoreGui"):FindFirstChild("DragonBloxTestingHub") then
+	game:GetService("CoreGui"):FindFirstChild("DragonBloxTestingHub"):Destroy()
+end
+
+-- 2. THIẾT KẾ GIAO DIỆN DARK MODE CHO ĐIỆN THOẠI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DragonBloxTestingHub"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = game:GetService("CoreGui")
+
+-- Bảng Menu Chính (Đen Tuyền)
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 250, 0, 435)
+MainFrame.Position = UDim2.new(0.1, 0, 0.15, 0) -- Vị trí tối ưu cho màn hình điện thoại cảm ứng nằm ngang
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 17) 
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local FrameCorner = Instance.new("UICorner")
+FrameCorner.CornerRadius = UDim.new(0, 10)
+FrameCorner.Parent = MainFrame
+
+-- TỐI ƯU HOÁ CƠ CHẾ KÉO THẢ BẰNG TAY (TOUCH) TRÊN MOBILE DELTA X
+local dragToggle, dragStart, startPos
+local function updateInput(input)
+	local delta = input.Position - dragStart
+	local position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	TweenService:Create(MainFrame, TweenInfo.new(0.08, Enum.EasingStyle.Linear), {Position = position}):Play()
+end
+MainFrame.InputBegan:Connect(function(input)
+	if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+		dragToggle = true
+		dragStart = input.Position
+		startPos = MainFrame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then dragToggle = false end
+		end)
+	end
+end)
+MainFrame.InputChanged:Connect(function(input)
+	if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		if dragToggle then updateInput(input) end
+	end
+end)
+
+-- Thanh Tiêu Đề
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+Title.Text = "⚡ DRAGON BLOX HUB (DELTA) ⚡"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 11
+Title.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 10)
+TitleCorner.Parent = Title
+
+-- NÚT BẤM TRÒN ẨN/HIỆN MINI (Hỗ trợ kéo thả linh hoạt trên màn hình điện thoại)
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Size = UDim2.new(0, 45, 0, 45)
+ToggleButton.Position = UDim2.new(0.02, 0, 0.15, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
+ToggleButton.Text = "👁"
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 18
+ToggleButton.Active = true
+ToggleButton.Parent = ScreenGui
+
+local RoundCorner = Instance.new("UICorner")
+RoundCorner.CornerRadius = UDim.new(1, 0)
+RoundCorner.Parent = ToggleButton
+
+local ButtonStroke = Instance.new("UIStroke")
+ButtonStroke.Color = Color3.fromRGB(0, 255, 120) 
+ButtonStroke.Thickness = 1.5
+ButtonStroke.Parent = ToggleButton
+
+-- Kéo thả nút tròn ẩn/hiện bằng tay trên Mobile
+local tDragToggle, tDragStart, tStartPos
+ToggleButton.InputBegan:Connect(function(input)
+	if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+		tDragToggle = true
+		tDragStart = input.Position
+		tStartPos = ToggleButton.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then tDragToggle = false end
+		end)
+	end
+end)
+ToggleButton.InputChanged:Connect(function(input)
+	if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		if tDragToggle then
+			local delta = input.Position - tDragStart
+			ToggleButton.Position = UDim2.new(tStartPos.X.Scale, tStartPos.X.Offset + delta.X, tStartPos.Y.Scale, tStartPos.Y.Offset + delta.Y)
+		end
+	end
+end)
+
+-- Hiệu ứng co thu nhỏ/mở rộng menu cho Mobile khi click nút tròn
+ToggleButton.MouseButton1Click:Connect(function()
+	Configuration.MenuVisible = not Configuration.MenuVisible
+	local targetSize = Configuration.MenuVisible and UDim2.new(0, 250, 0, 435) or UDim2.new(0, 250, 0, 0)
+	TweenService:Create(MainFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = targetSize}):Play()
+	
+	ToggleButton.Text = Configuration.MenuVisible and "👁" or "❌"
+	ToggleButton.BackgroundColor3 = Configuration.MenuVisible and Color3.fromRGB(20, 20, 22) or Color3.fromRGB(40, 15, 15)
+	ButtonStroke.Color = Configuration.MenuVisible and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 50, 50)
+end)
+
+-- Hàm đóng gói tạo nhanh các nút tính năng phong cách Neon tối giản
+local function createToggleButton(name, text, positionY)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0, 220, 0, 32)
+	button.Position = UDim2.new(0, 15, 0, positionY)
+	button.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
+	button.Text = "❌ " .. text
+	button.TextColor3 = Color3.fromRGB(170, 170, 170)
+	button.Font = Enum.Font.GothamSemibold
+	button.TextSize = 11 
+	button.ClipsDescendants = true
+	button.Parent = MainFrame
+	
+	local ButtonCorner = Instance.new("UICorner")
+	ButtonCorner.CornerRadius = UDim.new(0, 6)
+	ButtonCorner.Parent = button
+	
+	local UIStroke = Instance.new("UIStroke")
+	UIStroke.Color = Color3.fromRGB(45, 45, 50)
+	UIStroke.Thickness = 1
+	UIStroke.Parent = button
+
+	button.MouseButton1Click:Connect(function()
+		States[name] = not States[name]
+		if States[name] then
+			button.BackgroundColor3 = Color3.fromRGB(22, 44, 28)
+			UIStroke.Color = Color3.fromRGB(0, 255, 120)
+			button.TextColor3 = Color3.fromRGB(0, 255, 120)
+			button.Text = "✔ " .. text
+		else
+			button.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
+			UIStroke.Color = Color3.fromRGB(45, 45, 50)
+			button.TextColor3 = Color3.fromRGB(170, 170, 170)
+			button.Text = "❌ " .. text
+		end
+	end)
+end
+
+-- Đăng ký 10 nút bấm căn lề vừa vặn màn hình điện thoại
+createToggleButton("AutoFarm", "Auto Farm Quái Thường", 50)
+createToggleButton("AutoRaid", "Auto Chạy Ải Vượt Raid", 87)
+createToggleButton("AutoDungeon", "Auto Vào Phòng Dungeon", 124)
+createToggleButton("NoCooldown", "Bỏ Hồi Chiêu (No Cooldown)", 161)
+createToggleButton("Lifesteal", "Auto Hút Máu Hồi HP", 198)
+createToggleButton("AutoBeast", "Auto Vận Sức Hóa Beast", 235)
+createToggleButton("AutoTransform", "Auto Tiến Hóa Cấp SSJ", 272)
+createToggleButton("AutoAFK", "Chống Treo Máy (Anti-AFK)", 309)
+createToggleButton("AutoAtomMax", "Auto Săn Siêu Boss Atom", 346)
+createToggleButton("AutoDLS", "Auto Combo Chuỗi Skill DLS", 383)
+
+-- 3. HÀM QUÉT TÌM KIẾM MỤC TIÊU TRONG WORKSPACE
+local function getTarget(range, specificName)
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return nil, nil end
+	
+	local nearest, shortDist = nil, range
+	local enemyFolder = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("NPCs") or workspace
+	
+	for _, obj in pairs(enemyFolder:GetChildren()) do
+		if obj:IsA("Model") and obj ~= char then
+			if not specificName or (specificName and string.find(string.lower(obj.Name), string.lower(specificName))) then
+				local tHumanoid = obj:FindFirstChildOfClass("Humanoid")
+				local tRoot = obj:FindFirstChild("HumanoidRootPart")
+				if tHumanoid and tRoot and tHumanoid.Health > 0 then
+					local dist = (root.Position - tRoot.Position).Magnitude
+					if dist < shortDist then
+						shortDist = dist
+						nearest = obj
+					end
+				end
+			end
+		end
+	end
+	if nearest then
+		return nearest:FindFirstChildOfClass("Humanoid"), nearest:FindFirstChild("HumanoidRootPart")
+	end
