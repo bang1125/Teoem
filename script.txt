@@ -1,0 +1,217 @@
+-- =============================================================================
+-- DRAGON BLOX - TEXT-BASED MOBILE HUB (FIX FOR DELTA X VNG)
+-- =============================================================================
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local TeleportService = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+
+-- Khởi tạo vị trí chứa UI an toàn nhất cho Delta Mobile
+local GuiParent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- 1. TRẠNG THÁI CHỨC NĂNG
+local States = {
+	AutoFarm = false, AutoRaid = false, AutoDungeon = false, NoCooldown = false,
+	Lifesteal = false, AutoBeast = false, AutoTransform = false, AutoAFK = false,
+	AutoAtomMax = false, AutoDLS = false
+}
+
+local Config = {
+	AttackRange = 25, DamageAmount = 50, AttackCooldown = 0.7,
+	DungeonPlaceId = 3254817462, LifestealPercent = 0.25,
+	BeastRequiredKi = 500000, BossName = "Atom Max", NextComboIndex = 1,
+	MenuVisible = true, CurrentFormIndex = 0, BaseDamage = 50
+}
+
+local DLS_COMBO = {
+	{Name = "DLS 1", Damage = 150, Cooldown = 0.5},
+	{Name = "DLS 2", Damage = 300, Cooldown = 0.5},
+	{Name = "DLS 3", Damage = 600, Cooldown = 0.8}
+}
+
+-- Xóa UI cũ nếu có trùng lặp
+if GuiParent:FindFirstChild("DbloxMobileHub") then
+	GuiParent:FindFirstChild("DbloxMobileHub"):Destroy()
+end
+
+-- 2. TẠO GIAO DIỆN SIÊU NHẸ (LIGHTWEIGHT DARK MODE)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DbloxMobileHub"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = GuiParent
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 220, 0, 390)
+MainFrame.Position = UDim2.new(0.15, 0, 0.15, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 1
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+Title.Text = "DRAGON BLOX HUB"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 14
+Title.Parent = MainFrame
+
+-- HỆ THỐNG KÉO THẢ CẢM ỨNG (TOUCH MECHANIC)
+local dragToggle, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragToggle = true
+		dragStart = input.Position
+		startPos = MainFrame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then dragToggle = false end
+		end)
+	end
+end)
+MainFrame.InputChanged:Connect(function(input)
+	if dragToggle and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - dragStart
+		MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+
+-- Hàm tạo các nút bấm cơ bản
+local function createButton(name, text, positionY)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0, 200, 0, 28)
+	button.Position = UDim2.new(0, 10, 0, positionY)
+	button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	button.Text = "[ OFF ] " .. text
+	button.TextColor3 = Color3.fromRGB(200, 200, 200)
+	button.Font = Enum.Font.SourceSans
+	button.TextSize = 12
+	button.Parent = MainFrame
+
+	button.MouseButton1Click:Connect(function()
+		States[name] = not States[name]
+		if States[name] then
+			button.BackgroundColor3 = Color3.fromRGB(30, 80, 40)
+			button.TextColor3 = Color3.fromRGB(0, 255, 120)
+			button.Text = "[ ON ] " .. text
+		else
+			button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+			button.TextColor3 = Color3.fromRGB(200, 200, 200)
+			button.Text = "[ OFF ] " .. text
+		end
+	end)
+end
+
+createButton("AutoFarm", "Auto Farm Quái", 40)
+createButton("AutoRaid", "Auto Vượt Ải Raid", 73)
+createButton("NoCooldown", "Bỏ Hồi Chiêu Kỹ Năng", 106)
+createButton("Lifesteal", "Auto Hút Máu Hồi HP", 139)
+createButton("AutoBeast", "Auto Hóa Hình Beast", 172)
+createButton("AutoTransform", "Auto Tiến Hóa Cấp SSJ", 205)
+createButton("AutoAFK", "Chống Treo Máy AFK", 238)
+createButton("AutoAtomMax", "Auto Săn Boss Atom", 271)
+createButton("AutoDLS", "Auto Combo Kỹ Năng DLS", 304)
+createButton("AutoDungeon", "Auto Vào Phòng Dungeon", 337)
+
+-- 3. HÀM QUÉT MỤC TIÊU THEO DRAGON BLOX
+local function getTarget(range, specificName)
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return nil, nil end
+	
+	local nearest, shortDist = nil, range
+	local enemyFolder = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("NPCs") or workspace
+	
+	for _, obj in pairs(enemyFolder:GetChildren()) do
+		if obj:IsA("Model") and obj ~= char then
+			if not specificName or (specificName and string.find(string.lower(obj.Name), string.lower(specificName))) then
+				local tHumanoid = obj:FindFirstChildOfClass("Humanoid")
+				local tRoot = obj:FindFirstChild("HumanoidRootPart")
+				if tHumanoid and tRoot and tHumanoid.Health > 0 then
+					local dist = (root.Position - tRoot.Position).Magnitude
+					if dist < shortDist then
+						shortDist = dist
+						nearest = obj
+					end
+				end
+			end
+		end
+	end
+	if nearest then
+		return nearest:FindFirstChildOfClass("Humanoid"), nearest:FindFirstChild("HumanoidRootPart")
+	end
+	return nil, nil
+end
+
+-- 4. VÒNG LẶP LIÊN TỤC CHẠY NGẦM BỌC HÀM AN TOÀN TUYỆT ĐỐI
+task.spawn(function()
+	while true do
+		task.wait(Config.AttackCooldown)
+		local char = LocalPlayer.Character
+		local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+		local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+		
+		if char and humanoid and humanoid.Health > 0 and rootPart then
+			if States.AutoAFK then
+				pcall(function()
+					VirtualUser:CaptureController()
+					VirtualUser:ClickButton2(Vector2.new(0, 0))
+				end)
+			end
+
+			local targetHum, targetRoot = nil, nil
+			if States.AutoAtomMax then
+				targetHum, targetRoot = getTarget(math.huge, Config.BossName)
+				if targetRoot then
+					rootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 9, 0)
+					rootPart.Velocity = Vector3.new(0, 0, 0)
+				end
+			elseif States.AutoRaid then
+				targetHum, targetRoot = getTarget(math.huge)
+				if targetRoot and (rootPart.Position - targetRoot.Position).Magnitude > Config.AttackRange then
+					humanoid:MoveTo(targetRoot.Position)
+				end
+			elseif States.AutoFarm then
+				targetHum, targetRoot = getTarget(Config.AttackRange)
+			end
+			
+			if targetHum and targetHum.Health > 0 then
+				pcall(function() targetHum:TakeDamage(Config.DamageAmount) end)
+				if States.Lifesteal then
+					humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + (Config.DamageAmount * Config.LifestealPercent))
+				end
+			end
+			
+			if States.AutoDLS then
+				local dlsHum, _ = getTarget(35)
+				if dlsHum then
+					local currentSkill = DLS_COMBO[Config.NextComboIndex]
+					pcall(function() dlsHum:TakeDamage(currentSkill.Damage) end)
+					Config.NextComboIndex = Config.NextComboIndex < #DLS_COMBO and Config.NextComboIndex + 1 or 1
+					if not States.NoCooldown then task.wait(currentSkill.Cooldown) end
+				end
+			end
+			
+			local statsFolder = LocalPlayer:FindFirstChild("Stats") or char:FindFirstChild("Stats")
+			local kiValue = statsFolder and (statsFolder:FindFirstChild("Ki") or statsFolder:FindFirstChild("Energy"))
+			
+			if kiValue then
+				if States.AutoBeast and kiValue.Value < Config.BeastRequiredKi then
+					pcall(function() kiValue.Value = kiValue.Value + 15000 end)
+				end
+				if States.AutoTransform then
+					pcall(function() kiValue.Value = kiValue.Value + 2000 end)
+				end
+			end
+
+			if States.AutoDungeon and game.PlaceId ~= Config.DungeonPlaceId then
+				pcall(function() TeleportService:Teleport(Config.DungeonPlaceId, LocalPlayer) end)
+			end
+		end
+	end
+end)
+
+print("[Delta X Hub]: Đã nạp thành công phiên bản tối giản file text!")
